@@ -47,6 +47,7 @@ permissions:
       yamipa.command.remove: true
       yamipa.command.remove-at: true
       yamipa.command.top: true
+      yamipa.command.limit: true
 
   # Command permissions
   yamipa.command.clear:
@@ -73,6 +74,12 @@ permissions:
     default: op
   yamipa.command.top:
     default: op
+  yamipa.command.limit:
+    default: op
+
+  # Not granted by yamipa.*
+  yamipa.limit.bypass:
+    default: false
 
   # All item permissions
   yamipa.item.*:

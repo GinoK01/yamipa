@@ -59,6 +59,8 @@ cache-path: cache                 # Path to cache directory
 data-path: images.dat             # Path to placed images database file
 allowed-paths: null               # Set to a RegExp to limit accessible images to players
 max-image-dimension: 30           # Maximum width or height in blocks allowed in images
+limits:
+  images-per-player: -1           # Placed images per player. -1 disables the cap
 ```
 
 For more information on how to set a different `allowed-paths` or `max-image-dimension` value per player, see the
@@ -110,6 +112,8 @@ This plugin adds the following commands:
 - `/image remove`: Start UI dialog to remove a placed image from the world without deleting the image file.
 - `/image remove-at <x y z world> <face>`: Remove the image at the given coordinates.
 - `/image top`: List players with the most placed images.
+- `/image limit <player>`: Show how many images a player has placed, their limit and how many they can still place.
+- `/image limit recalculate <player>`: Recount the images placed by a player.
 
 ### Examples
 
@@ -158,6 +162,8 @@ Yamipa defines the following permissions:
 | `yamipa.command.remove.own` |     OPs     | Same as previous, but only for images placed by the same player |
 | `yamipa.command.remove-at`  |     OPs     | To use the `/image remove-at` command                           |
 | `yamipa.command.top`        |     OPs     | To use the `/image top` command                                 |
+| `yamipa.command.limit`      |     OPs     | To use the `/image limit` command                               |
+| `yamipa.limit.bypass`       |    Nobody   | To place images with no limit                                   |
 | `yamipa.item.place`         | All players | To place image items                                            |
 | `yamipa.item.remove`        | All players | To remove image items (that have the `REMO` flag)               |
 | `yamipa.item.remove.own`    | All players | Same as previous, but only for images placed by the same player |
@@ -178,10 +184,11 @@ This is useful for granting different capabilities to different players or group
 Yamipa looks for the following variables which, if found, override the default configuration value that applies to all
 players:
 
-| Variable (key)               | Overrides             | Description                                                                       |
-|:-----------------------------|:----------------------|:----------------------------------------------------------------------------------|
-| `yamipa-allowed-paths`       | `allowed-paths`       | Regular expression that limits which paths in the images directory are accessible |
-| `yamipa-max-image-dimension` | `max-image-dimension` | Maximum width or height of images and image items issued by this player or group  |
+| Variable (key)               | Overrides                  | Description                                                                       |
+|:-----------------------------|:---------------------------|:----------------------------------------------------------------------------------|
+| `yamipa-allowed-paths`       | `allowed-paths`            | Regular expression that limits which paths in the images directory are accessible |
+| `yamipa-max-image-dimension` | `max-image-dimension`      | Maximum width or height of images and image items issued by this player or group |
+| `yamipa-images-per-player`   | `limits.images-per-player` | Maximum number of images this player may have placed. `-1` means no limit        |
 
 For example, if you want to limit the image size to 5x5 blocks just for the "test" player, you can run this command:
 ```sh
@@ -190,6 +197,23 @@ For example, if you want to limit the image size to 5x5 blocks just for the "tes
 
 # Using GroupManager
 /manuaddv test yamipa-max-image-dimension 5
+```
+
+Players can also get their own limit. `yamipa.limit.bypass` removes the limit.
+With LuckPerms you can set `yamipa.limit.<n>`, for example `yamipa.limit.50`. If several of those are set, the highest number is used.
+Bukkit cannot list permissions like `yamipa.limit.50` on its own, so Yamipa reads them from LuckPerms.
+With GroupManager, set `yamipa-images-per-player` instead. When both are present, `yamipa.limit.<n>` is used.
+
+This limit counts images in the world, not files in the images folder. One image counts as one, no matter how many blocks it covers.
+Removing an image frees a slot. The count is rebuilt from the placed images when the server starts.
+
+```sh
+# LuckPerms: 50 placed images for the vip group, no cap for staff
+/lp group vip permission set yamipa.limit.50 true
+/lp group staff permission set yamipa.limit.bypass true
+
+# GroupManager: same cap via the player variable
+/manuaddv somedonor yamipa-images-per-player 50
 ```
 
 ## Protecting areas

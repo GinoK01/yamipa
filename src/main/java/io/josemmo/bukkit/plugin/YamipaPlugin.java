@@ -93,6 +93,7 @@ public class YamipaPlugin extends JavaPlugin {
         config.addDefault("data-path", "images.dat");
         config.addDefault("allowed-paths", null);
         config.addDefault("max-image-dimension", 30);
+        config.addDefault("limits.images-per-player", -1);
         config.options().copyDefaults(true);
         saveConfig();
 

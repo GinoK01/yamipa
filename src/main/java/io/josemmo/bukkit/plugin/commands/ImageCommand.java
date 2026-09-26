@@ -71,6 +71,10 @@ public class ImageCommand {
         if (s.hasPermission("yamipa.command.top") || s.hasPermission("yamipa.top")) {
             s.sendMessage(ChatColor.AQUA + cmd + " top" + ChatColor.RESET + " - List players with the most images");
         }
+        if (s.hasPermission("yamipa.command.limit")) {
+            s.sendMessage(ChatColor.AQUA + cmd + " limit <player>" + ChatColor.RESET + " - Show image limit");
+            s.sendMessage(ChatColor.AQUA + cmd + " limit recalculate <player>" + ChatColor.RESET + " - Recalculate image count");
+        }
     }
 
     public static void listImages(@NotNull CommandSender sender, int page) {
@@ -275,13 +279,61 @@ public class ImageCommand {
         if (senderIsPlayer) {
             ActionBar loadingActionBar = ActionBar.repeat((Player) sender, ChatColor.AQUA + "Loading image...");
             fakeImage.setOnLoadedListener(loadingActionBar::clear);
+            if (!renderer.addImage(fakeImage)) {
+                loadingActionBar.clear();
+                sendPlacementLimitReached((Player) sender, renderer);
+                return false;
+            }
+        } else if (!renderer.addImage(fakeImage)) {
+            sender.sendMessage(ChatColor.RED + "That player has reached their image limit");
+            return false;
         } else {
             sender.sendMessage(ChatColor.GREEN + "Placed image " + fakeImage.getFilename());
         }
-
-        // Add fake image to renderer
-        renderer.addImage(fakeImage);
         return true;
+    }
+
+    /**
+     * Show image limit for a player
+     * @param sender      Command sender
+     * @param player      Player instance
+     * @param recalculate TRUE to recount placed images first
+     */
+    public static void showPlacementLimit(
+        @NotNull CommandSender sender,
+        @NotNull OfflinePlayer player,
+        boolean recalculate
+    ) {
+        ImageRenderer renderer = YamipaPlugin.getInstance().getRenderer();
+        String name = player.getName() == null ? player.getUniqueId().toString() : player.getName();
+        if (recalculate) {
+            renderer.recalculatePlacedImages(player.getUniqueId());
+            sender.sendMessage(ChatColor.GREEN + "Recalculated images for " + name);
+        }
+
+        int placed = renderer.getPlacedCount(player.getUniqueId());
+        Integer limit = Permissions.imagesPerPlayerLimit(player);
+        sender.sendMessage(ChatColor.GOLD + "Player: " + ChatColor.RESET + name);
+        sender.sendMessage(ChatColor.GOLD + "Images placed: " + ChatColor.RESET + placed);
+        if (limit == null) {
+            sender.sendMessage(ChatColor.GOLD + "Limit: " + ChatColor.RESET + "unknown (player offline)");
+            sender.sendMessage(ChatColor.GOLD + "Remaining: " + ChatColor.RESET + "unknown (player offline)");
+            return;
+        }
+        if (limit < 0) {
+            sender.sendMessage(ChatColor.GOLD + "Limit: " + ChatColor.RESET + "unlimited");
+            sender.sendMessage(ChatColor.GOLD + "Remaining: " + ChatColor.RESET + "unlimited");
+            return;
+        }
+        sender.sendMessage(ChatColor.GOLD + "Limit: " + ChatColor.RESET + limit);
+        sender.sendMessage(ChatColor.GOLD + "Remaining: " + ChatColor.RESET + Math.max(0, limit - placed));
+    }
+
+    private static void sendPlacementLimitReached(@NotNull Player player, @NotNull ImageRenderer renderer) {
+        Integer limit = Permissions.imagesPerPlayerLimit(player);
+        int current = renderer.getPlacedCount(player.getUniqueId());
+        int max = (limit == null || limit < 0) ? current : limit;
+        ActionBar.send(player, ChatColor.RED + "You've reached your image limit (" + current + "/" + max + ")!");
     }
 
     public static void removeImage(@NotNull Player player) {

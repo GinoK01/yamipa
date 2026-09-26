@@ -76,7 +76,8 @@ public class ImageCommandBridge {
                 "yamipa.command.place", "yamipa.place",
                 "yamipa.command.place-at",
                 "yamipa.command.remove.own", "yamipa.remove",
-                "yamipa.command.top", "yamipa.top"
+                "yamipa.command.top", "yamipa.top",
+                "yamipa.command.limit"
             )
             .executes((sender, args) -> {
                 ImageCommand.showHelp(sender, (String) args[0]);
@@ -370,6 +371,19 @@ public class ImageCommandBridge {
             .withPermission("yamipa.command.top", "yamipa.top")
             .executes((sender, __) -> {
                 ImageCommand.showTopPlayers(sender);
+            });
+
+        // Limit subcommand
+        Command limit = root.addSubcommand("limit")
+            .withPermission("yamipa.command.limit");
+        limit.withArgument(new LimitPlayerArgument("player"))
+            .executes((sender, args) -> {
+                ImageCommand.showPlacementLimit(sender, (OfflinePlayer) args[1], false);
+            });
+        limit.addSubcommand("recalculate")
+            .withArgument(new LimitPlayerArgument("player"))
+            .executes((sender, args) -> {
+                ImageCommand.showPlacementLimit(sender, (OfflinePlayer) args[1], true);
             });
 
         return root;

@@ -11,6 +11,7 @@ import com.sk89q.worldguard.internal.platform.WorldGuardPlatform;
 import com.sk89q.worldguard.protection.flags.Flags;
 import com.sk89q.worldguard.protection.flags.StateFlag;
 import io.josemmo.bukkit.plugin.YamipaPlugin;
+import io.josemmo.bukkit.plugin.renderer.PlacementLimit;
 import me.angeschossen.lands.api.LandsIntegration;
 import me.angeschossen.lands.api.flags.type.RoleFlag;
 import me.angeschossen.lands.api.land.LandWorld;
@@ -18,12 +19,18 @@ import me.angeschossen.lands.api.player.LandPlayer;
 import me.ryanhamshire.GriefPrevention.GriefPrevention;
 import net.luckperms.api.LuckPerms;
 import net.luckperms.api.LuckPermsProvider;
+import net.luckperms.api.model.user.User;
 import org.anjocaido.groupmanager.GroupManager;
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.OfflinePlayer;
 import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 
@@ -93,6 +100,52 @@ public class Permissions {
         }
 
         return null;
+    }
+
+    /**
+     * Get image limit for a player
+     * <p>
+     * Offline players need LuckPerms and a cached user. Otherwise this returns NULL.
+     * @param  player Player instance
+     * @return        Image limit, {@link PlacementLimit#UNLIMITED}, or NULL if unknown
+     */
+    public static @Nullable Integer imagesPerPlayerLimit(@NotNull OfflinePlayer player) {
+        int global = YamipaPlugin.getInstance().getConfig().getInt(
+            "limits.images-per-player",
+            PlacementLimit.UNLIMITED
+        );
+        Player online = player.getPlayer();
+        if (online != null) {
+            String meta = getVariable(PlacementLimit.META_KEY, online);
+            warnInvalidMeta(online.getName(), meta);
+            List<String> nodes = (luckPerms == null) ?
+                Collections.emptyList() :
+                getGrantedNodes(luckPerms.getPlayerAdapter(Player.class).getUser(online));
+            return PlacementLimit.resolve(global, online.hasPermission(PlacementLimit.BYPASS_PERMISSION), meta, nodes);
+        }
+        if (luckPerms == null) return null;
+
+        User user = luckPerms.getUserManager().getUser(player.getUniqueId());
+        if (user == null) return null;
+        boolean bypass = user.getCachedData().getPermissionData()
+            .checkPermission(PlacementLimit.BYPASS_PERMISSION).asBoolean();
+        String meta = user.getCachedData().getMetaData().getMetaValue(PlacementLimit.META_KEY);
+        String name = player.getName() == null ? player.getUniqueId().toString() : player.getName();
+        warnInvalidMeta(name, meta);
+        return PlacementLimit.resolve(global, bypass, meta, getGrantedNodes(user));
+    }
+
+    private static void warnInvalidMeta(@NotNull String name, @Nullable String meta) {
+        if (meta == null || meta.trim().isEmpty() || PlacementLimit.parseMeta(meta) != null) return;
+        LOGGER.warning("Invalid " + PlacementLimit.META_KEY + " for " + name + ": \"" + meta + "\"");
+    }
+
+    private static @NotNull List<String> getGrantedNodes(@NotNull User user) {
+        List<String> nodes = new ArrayList<>();
+        for (Map.Entry<String, Boolean> entry : user.getCachedData().getPermissionData().getPermissionMap().entrySet()) {
+            if (Boolean.TRUE.equals(entry.getValue())) nodes.add(entry.getKey());
+        }
+        return nodes;
     }
 
     /**

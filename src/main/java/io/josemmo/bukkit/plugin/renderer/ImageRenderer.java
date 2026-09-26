@@ -3,6 +3,7 @@ package io.josemmo.bukkit.plugin.renderer;
 import io.josemmo.bukkit.plugin.YamipaPlugin;
 import io.josemmo.bukkit.plugin.utils.CsvConfiguration;
 import io.josemmo.bukkit.plugin.utils.Logger;
+import io.josemmo.bukkit.plugin.utils.Permissions;
 import org.bukkit.*;
 import org.bukkit.block.BlockFace;
 import org.bukkit.entity.Entity;
@@ -34,7 +35,7 @@ public class ImageRenderer implements Listener {
     private @Nullable ScheduledFuture<?> saveTask;
     private final AtomicBoolean hasConfigChanged = new AtomicBoolean(false);
     private final ConcurrentMap<WorldAreaId, Set<FakeImage>> images = new ConcurrentHashMap<>();
-    private final ConcurrentMap<UUID, Integer> imagesCountByPlayer = new ConcurrentHashMap<>();
+    private final PlacementLimit placedCounts = new PlacementLimit();
     private final Map<Player, WorldAreaId> playersLocation = new HashMap<>();
 
     /**
@@ -96,7 +97,7 @@ public class ImageRenderer implements Listener {
 
         // Clear dangling references
         images.clear();
-        imagesCountByPlayer.clear();
+        placedCounts.clear();
         playersLocation.clear();
     }
 
@@ -199,11 +200,22 @@ public class ImageRenderer implements Listener {
 
     /**
      * Add image to renderer
-     * @param image  Fake image instance
-     * @param isInit TRUE if called during renderer startup, FALSE otherwise
+     * <p>
+     * When {@code isInit} is TRUE the limit is not checked, so images loaded from disk are kept.
+     * @param  image  Fake image instance
+     * @param  isInit TRUE if called during renderer startup, FALSE otherwise
+     * @return        FALSE if the player who placed it is at their limit
      */
-    public void addImage(@NotNull FakeImage image, boolean isInit) {
+    public boolean addImage(@NotNull FakeImage image, boolean isInit) {
         WorldAreaId[] imageWorldAreaIds = image.getWorldAreaIds();
+        int limit = PlacementLimit.UNLIMITED;
+        if (!isInit) {
+            Integer resolved = Permissions.imagesPerPlayerLimit(image.getPlacedBy());
+            if (resolved != null) limit = resolved;
+        }
+        if (!placedCounts.tryAcquire(image.getPlacedBy().getUniqueId(), limit)) {
+            return false;
+        }
 
         // Add image to renderer
         for (WorldAreaId worldAreaId : imageWorldAreaIds) {
@@ -212,28 +224,24 @@ public class ImageRenderer implements Listener {
                 return ConcurrentHashMap.newKeySet();
             }).add(image);
         }
-
-        // Set configuration changed flag
         if (!isInit) {
             hasConfigChanged.set(true);
         }
-
-        // Increment count of placed images by player
-        UUID placedById = image.getPlacedBy().getUniqueId();
-        imagesCountByPlayer.compute(placedById, (__, prev) -> (prev == null) ? 1 : prev+1);
 
         // Spawn image in players nearby
         for (Player player : getPlayersInViewDistance(imageWorldAreaIds)) {
             image.spawn(player);
         }
+        return true;
     }
 
     /**
      * Add image to renderer
-     * @param image Fake image instance
+     * @param  image Fake image instance
+     * @return       FALSE if the player who placed it is at their limit
      */
-    public void addImage(@NotNull FakeImage image) {
-        addImage(image, false);
+    public boolean addImage(@NotNull FakeImage image) {
+        return addImage(image, false);
     }
 
     /**
@@ -293,22 +301,21 @@ public class ImageRenderer implements Listener {
         // Destroy image from all players nearby
         image.destroy();
 
-        // Remove image from renderer
-        for (WorldAreaId worldAreaId : imageWorldAreaIds) {
-            Set<FakeImage> worldAreaImages = images.get(worldAreaId);
-            worldAreaImages.remove(image);
-            if (worldAreaImages.isEmpty()) {
-                LOGGER.fine("Destroyed WorldArea#(" + worldAreaId + ")");
-                images.remove(worldAreaId);
+        synchronized (placedCounts) {
+            boolean removed = false;
+            for (WorldAreaId worldAreaId : imageWorldAreaIds) {
+                Set<FakeImage> worldAreaImages = images.get(worldAreaId);
+                if (worldAreaImages == null) continue;
+                if (worldAreaImages.remove(image)) removed = true;
+                if (worldAreaImages.isEmpty()) {
+                    LOGGER.fine("Destroyed WorldArea#(" + worldAreaId + ")");
+                    images.remove(worldAreaId);
+                }
             }
+            if (!removed) return;
+            hasConfigChanged.set(true);
+            placedCounts.release(image.getPlacedBy().getUniqueId());
         }
-
-        // Set configuration changed flag
-        hasConfigChanged.set(true);
-
-        // Decrement count of placed images by player
-        UUID placedById = image.getPlacedBy().getUniqueId();
-        imagesCountByPlayer.compute(placedById, (__, prev) -> (prev != null && prev > 1) ? prev-1 : null);
     }
 
     /**
@@ -316,7 +323,39 @@ public class ImageRenderer implements Listener {
      * @return Offline players
      */
     public @NotNull Set<OfflinePlayer> getPlayersWithPlacedImages() {
-        return imagesCountByPlayer.keySet().stream().map(Bukkit::getOfflinePlayer).collect(Collectors.toSet());
+        return placedCounts.snapshot().keySet().stream().map(Bukkit::getOfflinePlayer).collect(Collectors.toSet());
+    }
+
+    /**
+     * Get placed image count for a player
+     * @param  playerId Player UUID
+     * @return          Number of placed images
+     */
+    public int getPlacedCount(@NotNull UUID playerId) {
+        return placedCounts.get(playerId);
+    }
+
+    /**
+     * Recount placed images for a player
+     * <p>
+     * The same image can belong to several world areas, so it is counted once.
+     * @param  playerId Player UUID
+     * @return          Number of placed images
+     */
+    public int recalculatePlacedImages(@NotNull UUID playerId) {
+        synchronized (placedCounts) {
+            int count = 0;
+            Set<FakeImage> seen = new HashSet<>();
+            for (Set<FakeImage> part : images.values()) {
+                for (FakeImage image : part) {
+                    if (seen.add(image) && playerId.equals(image.getPlacedBy().getUniqueId())) {
+                        count++;
+                    }
+                }
+            }
+            placedCounts.set(playerId, count);
+            return count;
+        }
     }
 
     /**
@@ -324,7 +363,11 @@ public class ImageRenderer implements Listener {
      * @return Number of placed images
      */
     public int size() {
-        return imagesCountByPlayer.values().stream().reduce(0, Integer::sum);
+        int total = 0;
+        for (int count : placedCounts.snapshot().values()) {
+            total += count;
+        }
+        return total;
     }
 
     /**
@@ -334,7 +377,7 @@ public class ImageRenderer implements Listener {
      * @return Images count by player
      */
     public @NotNull Map<OfflinePlayer, Integer> getImagesCountByPlayer() {
-        List<Map.Entry<UUID, Integer>> sortedEntries = new ArrayList<>(imagesCountByPlayer.entrySet());
+        List<Map.Entry<UUID, Integer>> sortedEntries = new ArrayList<>(placedCounts.snapshot().entrySet());
         sortedEntries.sort(Map.Entry.comparingByValue(Comparator.reverseOrder()));
 
         Map<OfflinePlayer, Integer> sortedMap = new LinkedHashMap<>();
