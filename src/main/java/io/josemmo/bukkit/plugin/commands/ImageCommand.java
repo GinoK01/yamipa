@@ -11,6 +11,7 @@ import io.josemmo.bukkit.plugin.utils.BlockFaceWithRotation;
 import io.josemmo.bukkit.plugin.utils.Logger;
 import io.josemmo.bukkit.plugin.utils.Permissions;
 import io.josemmo.bukkit.plugin.utils.ActionBar;
+import io.josemmo.bukkit.plugin.utils.AuroraImagePermissions;
 import org.bukkit.*;
 import org.bukkit.block.BlockFace;
 import org.bukkit.command.CommandSender;
@@ -259,7 +260,12 @@ public class ImageCommand {
         );
 
         // Make sure image can be placed
-        for (Location loc : fakeImage.getAllLocations()) {
+        Location[] locations = fakeImage.getAllLocations();
+        if (senderIsPlayer && !AuroraImagePermissions.allows((Player) sender, locations, blockFace)) {
+            ActionBar.send((Player) sender, ChatColor.RED + "You're not allowed to place an image here!");
+            return false;
+        }
+        for (Location loc : locations) {
             if (senderIsPlayer && !Permissions.canBuild((Player) sender, loc)) {
                 ActionBar.send((Player) sender, ChatColor.RED + "You're not allowed to place an image here!");
                 return false;
@@ -358,16 +364,26 @@ public class ImageCommand {
     }
 
     public static boolean removeImage(@NotNull Player player, @NotNull FakeImage image) {
-        // Check block permissions
-        for (Location loc : image.getAllLocations()) {
-            if (!Permissions.canDestroy(player, loc)) {
-                ActionBar.send(player, ChatColor.RED + "You're not allowed to remove this image!");
-                return false;
-            }
+        if (!canRemoveImage(player, image)) {
+            ActionBar.send(player, ChatColor.RED + "You're not allowed to remove this image!");
+            return false;
         }
 
         // Trigger image removal
         YamipaPlugin.getInstance().getRenderer().removeImage(image);
+        return true;
+    }
+
+    private static boolean canRemoveImage(@NotNull Player player, @NotNull FakeImage image) {
+        Location[] locations = image.getAllLocations();
+        if (!AuroraImagePermissions.allows(player, locations, image.getBlockFace())) {
+            return false;
+        }
+        for (Location loc : locations) {
+            if (!Permissions.canDestroy(player, loc)) {
+                return false;
+            }
+        }
         return true;
     }
 
@@ -382,6 +398,11 @@ public class ImageCommand {
         FakeImage image = renderer.getImage(location, blockFaceWithRotation.getBlockFace());
         if (image == null) {
             sender.sendMessage(ChatColor.RED + "There is no image at this location!");
+            return;
+        }
+        if (sender instanceof Player
+            && !AuroraImagePermissions.allows((Player) sender, image.getAllLocations(), image.getBlockFace())) {
+            sender.sendMessage(ChatColor.RED + "You're not allowed to remove this image!");
             return;
         }
 
@@ -416,14 +437,7 @@ public class ImageCommand {
         // Filter out images outside the permission scope of the sender
         if (sender instanceof Player) {
             Player senderAsPlayer = (Player) sender;
-            images.removeIf(image -> {
-                for (Location loc : image.getAllLocations()) {
-                    if (!Permissions.canDestroy(senderAsPlayer, loc)) {
-                        return true;
-                    }
-                }
-                return false;
-            });
+            images.removeIf(image -> !canRemoveImage(senderAsPlayer, image));
         }
 
         // Remove found images
